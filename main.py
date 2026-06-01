@@ -1,24 +1,107 @@
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.api import AstrBotConfig
+from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
+import astrbot.api.message_components as Comp
 
-@register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
-class MyPlugin(Star):
-    def __init__(self, context: Context):
-        super().__init__(context)
+from .model import QxqyService
+
+
+@register("qxqy", "Yuef", "千星奇域-关卡查询插件", "1.0.0")
+class QxqyPlugin(Star):
+    def __init__(self, context: Context, config: AstrBotConfig):
+        super().__init__(context, config)
+        self.config = config
+        self.service = QxqyService(config)
 
     async def initialize(self):
-        """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
+        """插件初始化"""
+        logger.info("千星奇域关卡查询插件已加载")
 
-    # 注册指令的装饰器。指令名为 helloworld。注册成功后，发送 `/helloworld` 就会触发这个指令，并回复 `你好, {user_name}!`
-    @filter.command("helloworld")
-    async def helloworld(self, event: AstrMessageEvent):
-        """这是一个 hello world 指令""" # 这是 handler 的描述，将会被解析方便用户了解插件内容。建议填写。
-        user_name = event.get_sender_name()
-        message_str = event.message_str # 用户发的纯文本消息字符串
-        message_chain = event.get_messages() # 用户所发的消息的消息链 # from astrbot.api.message_components import *
-        logger.info(message_chain)
-        yield event.plain_result(f"Hello, {user_name}, 你发了 {message_str}!") # 发送一条纯文本消息
+    @filter.command("qx")
+    async def query_level_detail(self, event: AstrMessageEvent):
+        """
+        查询关卡详情 - 用法: /qx {level_id}
+
+        Args:
+            event: 消息事件对象
+        """
+        args = event.message_str.strip().split(maxsplit=1)
+        if len(args) < 2:
+            yield event.plain_result("请提供关卡ID，用法: /qx {level_id}")
+            return
+
+        level_id = args[1].strip()
+        if not level_id:
+            yield event.plain_result("关卡ID不能为空，用法: /qx {level_id}")
+            return
+
+        success, message, chain = await self.service.query_level_detail(level_id)
+        if not success:
+            yield event.plain_result(message)
+            return
+
+        if chain is None:
+            yield event.plain_result("获取结果为空")
+            return
+        yield event.chain_result(chain)
+
+    @filter.command("qc")
+    async def query_level_comments(self, event: AstrMessageEvent):
+        """
+        查询关卡评论 - 用法: /qc {level_id}
+
+        Args:
+            event: 消息事件对象
+        """
+        args = event.message_str.strip().split(maxsplit=1)
+        if len(args) < 2:
+            yield event.plain_result("请提供关卡ID，用法: /qc {level_id}")
+            return
+
+        level_id = args[1].strip()
+        if not level_id:
+            yield event.plain_result("关卡ID不能为空，用法: /qc {level_id}")
+            return
+
+        success, message, chain = await self.service.query_level_comments(level_id)
+        if not success:
+            yield event.plain_result(message)
+            return
+
+        if chain is None:
+            yield event.plain_result("获取结果为空")
+            return
+        yield event.chain_result(chain)
+
+    @filter.command("qce")
+    async def export_level_comments(self, event: AstrMessageEvent):
+        """
+        导出全量评论为CSV - 用法: /qce {level_id}
+
+        Args:
+            event: 消息事件对象
+        """
+        args = event.message_str.strip().split(maxsplit=1)
+        if len(args) < 2:
+            yield event.plain_result("请提供关卡ID，用法: /qce {level_id}")
+            return
+
+        level_id = args[1].strip()
+        if not level_id:
+            yield event.plain_result("关卡ID不能为空，用法: /qce {level_id}")
+            return
+
+        yield event.plain_result("正在抓取全量评论，请稍候...")
+
+        success, message, filepath, filename = await self.service.export_comments_csv(level_id)
+        if not success or filepath is None or filename is None:
+            yield event.plain_result(message)
+            return
+
+        chain = [Comp.Plain(message + "\n"), Comp.File(file=filepath, name=filename)]
+        yield event.chain_result(chain)
 
     async def terminate(self):
-        """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
+        """插件销毁"""
+        logger.info("千星奇域查询插件已卸载")

@@ -1,0 +1,26 @@
+{
+  "comments_count": {
+    "description": "每次获取评论数量",
+    "type": "int",
+    "hint": "调用评论API时每次请求的评论数量，范围1-100",
+    "default": 30
+  },
+  "intro_max_length": {
+    "description": "关卡简介最大显示长度",
+    "type": "int",
+    "hint": "超过此长度的关卡简介将被截断并以...结尾",
+    "default": 240
+  },
+  "comment_max_length": {
+    "description": "每条评论最大显示长度",
+    "type": "int",
+    "hint": "超过此长度的评论内容将被截断并以...结尾",
+    "default": 150
+  },
+  "request_timeout": {
+    "description": "API请求超时时间(秒)",
+    "type": "int",
+    "hint": "调用米游社API的超时时间，网络不稳定时可适当增大",
+    "default": 10
+  }
+}
