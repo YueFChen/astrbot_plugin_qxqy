@@ -1,6 +1,6 @@
 # 千星助手 (astrbot_plugin_qxqy)
 
-基于 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 的米游社奇域（无期迷途·千星奇域）关卡查询插件。查询关卡详情、评论，并支持全量评论 CSV 导出。
+基于 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 的奇域（原神·千星奇域）关卡查询插件。查询关卡详情、评论，并支持全量评论 CSV 导出。
 
 ## 功能
 
