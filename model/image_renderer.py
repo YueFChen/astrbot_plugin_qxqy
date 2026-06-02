@@ -21,10 +21,29 @@ RENDERER_DEFAULT_HEIGHT = 720
 RENDERER_DEFAULT_SCALE = 2
 RENDERER_LOAD_TIMEOUT = 15000
 RENDERER_WAIT_DELAY = 2000
+BROWSER_INSTALL_TIMEOUT = 300  # 浏览器安装超时（秒）
+BROWSER_LAUNCH_TIMEOUT = 60    # 浏览器启动超时（秒）
 
 # 浏览器安装标记和锁
 _browser_installed = False
 _browser_install_lock = Lock()
+
+
+def _get_browser_launch_args() -> list:
+    """获取浏览器启动参数（解决容器/沙盒环境问题）"""
+    return [
+        "--no-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--disable-setuid-sandbox",
+        "--disable-software-rasterizer",
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-default-apps",
+        "--disable-extensions",
+        "--disable-features=VizDisplayCompositor",
+    ]
 
 
 async def _ensure_browser_installed() -> None:
@@ -53,10 +72,22 @@ async def _ensure_browser_installed() -> None:
             logger.info(f"[浏览器安装检查] 尝试启动 Chromium 浏览器进行验证")
             async with async_playwright() as p:
                 logger.info(f"[浏览器安装检查] Playwright 初始化成功，启动浏览器...")
-                browser = await p.chromium.launch(headless=True)
-                logger.info(f"[浏览器安装检查] 浏览器启动成功，正在关闭...")
-                await browser.close()
-            
+                
+                # 添加超时机制启动浏览器
+                try:
+                    browser = await asyncio.wait_for(
+                        p.chromium.launch(
+                            headless=True,
+                            args=_get_browser_launch_args()
+                        ),
+                        timeout=BROWSER_LAUNCH_TIMEOUT
+                    )
+                    logger.info(f"[浏览器安装检查] 浏览器启动成功，正在关闭...")
+                    await browser.close()
+                except asyncio.TimeoutError:
+                    logger.error(f"[浏览器安装检查] ❌ 浏览器启动超时（{BROWSER_LAUNCH_TIMEOUT}秒）")
+                    raise RuntimeError(f"浏览器启动超时，请检查环境是否支持 Chromium")
+                
             _browser_installed = True
             logger.info(f"[浏览器安装检查] ✅ Chromium 浏览器已就绪")
         except Exception as initial_e:
@@ -71,8 +102,20 @@ async def _ensure_browser_installed() -> None:
                     stderr=asyncio.subprocess.PIPE
                 )
                 
-                logger.info(f"[浏览器安装检查] 等待安装进程完成...")
-                return_code = await process.wait()
+                logger.info(f"[浏览器安装检查] 等待安装进程完成（超时: {BROWSER_INSTALL_TIMEOUT}秒）...")
+                # 添加安装超时机制
+                try:
+                    return_code = await asyncio.wait_for(
+                        process.wait(),
+                        timeout=BROWSER_INSTALL_TIMEOUT
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"[浏览器安装检查] ❌ 安装超时（{BROWSER_INSTALL_TIMEOUT}秒）")
+                    try:
+                        process.kill()
+                    except:
+                        pass
+                    raise RuntimeError(f"浏览器安装超时，请手动运行: playwright install chromium")
                 
                 stdout, stderr = await process.communicate()
                 stdout_str = stdout.decode('utf-8', errors='ignore') if stdout else ""
@@ -156,7 +199,18 @@ class ImageRenderer:
                 try:
                     logger.info(f"[渲染器] 步骤3: 启动Chromium浏览器")
                     async with async_playwright() as p:
-                        browser = await p.chromium.launch(headless=True)
+                        logger.info(f"[渲染器] 使用浏览器启动参数: {_get_browser_launch_args()}")
+                        try:
+                            browser = await asyncio.wait_for(
+                                p.chromium.launch(
+                                    headless=True,
+                                    args=_get_browser_launch_args()
+                                ),
+                                timeout=BROWSER_LAUNCH_TIMEOUT
+                            )
+                        except asyncio.TimeoutError:
+                            logger.error(f"[渲染器] ❌ 浏览器启动超时（{BROWSER_LAUNCH_TIMEOUT}秒）")
+                            raise RuntimeError(f"浏览器启动超时，请检查环境是否支持 Chromium")
                         logger.info(f"[渲染器] 步骤3完成: 浏览器启动成功")
 
                         logger.info(f"[渲染器] 步骤4: 创建新页面")
@@ -239,7 +293,18 @@ class ImageRenderer:
             try:
                 logger.info(f"[渲染器] 步骤3: 启动Chromium浏览器")
                 async with async_playwright() as p:
-                    browser = await p.chromium.launch(headless=True)
+                    logger.info(f"[渲染器] 使用浏览器启动参数: {_get_browser_launch_args()}")
+                    try:
+                        browser = await asyncio.wait_for(
+                            p.chromium.launch(
+                                headless=True,
+                                args=_get_browser_launch_args()
+                            ),
+                            timeout=BROWSER_LAUNCH_TIMEOUT
+                        )
+                    except asyncio.TimeoutError:
+                        logger.error(f"[渲染器] ❌ 浏览器启动超时（{BROWSER_LAUNCH_TIMEOUT}秒）")
+                        raise RuntimeError(f"浏览器启动超时，请检查环境是否支持 Chromium")
                     logger.info(f"[渲染器] 步骤3完成: 浏览器启动成功")
 
                     logger.info(f"[渲染器] 步骤4: 创建新页面")
