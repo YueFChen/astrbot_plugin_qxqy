@@ -111,7 +111,6 @@ class ImageRenderer:
             ) as f:
                 f.write(html_content)
                 f.flush()
-                temp_html_path = f.name
 
                 browser = None
                 try:
@@ -121,7 +120,7 @@ class ImageRenderer:
                             viewport={"width": width, "height": height},
                             device_scale_factor=scale
                         )
-                        await page.goto(Path(temp_html_path).as_uri())
+                        await page.goto(Path(f.name).as_uri())
 
                         # 等待页面和资源加载完成
                         await self._wait_for_page_load(page)

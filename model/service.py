@@ -56,7 +56,7 @@ class QxqyService:
         value = data.get(key, default)
         return value if value is not None else default
 
-    async def _schedule_file_cleanup(self, filepath: str, delay: int):
+    async def _schedule_file_cleanup(self, filepath: str, delay: Optional[int] = None):
         """
         延迟清理临时文件
         
@@ -206,8 +206,6 @@ class QxqyService:
 
         if not reply_list:
             return False, "该关卡暂无评论", None, None
-
-        import tempfile
 
         temp_dir = tempfile.gettempdir()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -431,10 +429,9 @@ class QxqyService:
             html_content = html_content.replace("{{bg_position}}", bg_position)
 
             # 生成临时图片文件
-            temp_dir = tempfile.gettempdir()
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"qxqy_level_{level_id}_{timestamp}.png"
-            output_path = os.path.join(temp_dir, filename)
+            output_path = os.path.join(tempfile.gettempdir(), filename)
 
             # 使用图片渲染器生成图片（横版 16:9，4K 分辨率）
             renderer = get_image_renderer()
