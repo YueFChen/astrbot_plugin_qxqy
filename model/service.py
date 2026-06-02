@@ -368,36 +368,46 @@ class QxqyService:
         Returns:
             (成功状态, 消息, 图片文件路径)
         """
+        logger.info(f"[图片生成] 开始处理关卡ID: {level_id}")
+        
         try:
+            logger.info(f"[图片生成] 步骤1: 调用API获取关卡详情")
             data = await self.api_client.get_level_detail(level_id)
-            logger.info(f"API响应: {data}")
+            logger.info(f"[图片生成] 步骤1完成: API响应状态码: {data.get('retcode')}")
         except asyncio.TimeoutError:
+            logger.error(f"[图片生成] 步骤1失败: 请求超时")
             return False, "请求超时，请稍后重试", None
         except Exception as e:
+            logger.error(f"[图片生成] 步骤1失败: 网络请求失败 - {str(e)}")
             return False, f"网络请求失败: {str(e)}", None
 
         retcode = data.get("retcode")
         if retcode != 0:
             err_msg = data.get("message", "Unknown error")
-            logger.error(f"API错误: retcode={retcode}, message={err_msg}, level_id={level_id}")
+            logger.error(f"[图片生成] API错误: retcode={retcode}, message={err_msg}, level_id={level_id}")
             return False, f"API返回错误: retcode={retcode}, {err_msg}", None
 
         level_info = data.get("data", {}).get("level_info", {})
         if not level_info:
+            logger.warning(f"[图片生成] 未找到关卡ID {level_id} 的信息")
             return False, "未找到该关卡的信息", None
 
         try:
+            logger.info(f"[图片生成] 步骤2: 读取HTML模板")
             # 获取插件目录
             plugin_dir = Path(__file__).parent.parent
             template_path = plugin_dir / "templates" / "level_card.html"
 
             if not template_path.exists():
+                logger.error(f"[图片生成] 步骤2失败: 模板文件不存在 - {template_path}")
                 return False, f"模板文件不存在: {template_path}", None
 
             # 读取模板
             with open(template_path, 'r', encoding='utf-8') as f:
                 template = f.read()
+            logger.info(f"[图片生成] 步骤2完成: 模板文件读取成功，大小: {len(template)} 字符")
 
+            logger.info(f"[图片生成] 步骤3: 准备模板变量")
             # 准备模板变量
             level_name = self._safe_get(level_info, "level_name", "未知关卡")
             level_intro = self._safe_get(level_info, "level_intro", "暂无简介")
@@ -417,7 +427,9 @@ class QxqyService:
             bg_x = random.randint(0, 100)
             bg_y = random.randint(0, 100)
             bg_position = f"{bg_x}% {bg_y}%"
+            logger.info(f"[图片生成] 步骤3完成: 关卡名称={level_name}, 热度={hot_score}, 好评率={good_rate}")
 
+            logger.info(f"[图片生成] 步骤4: 替换模板变量")
             # 替换模板变量
             html_content = template.replace("{{level_id}}", level_id)
             html_content = html_content.replace("{{level_name}}", level_name)
@@ -427,28 +439,34 @@ class QxqyService:
             html_content = html_content.replace("{{bg_url}}", bg_url)
             html_content = html_content.replace("{{theme_color}}", theme_color)
             html_content = html_content.replace("{{bg_position}}", bg_position)
+            logger.info(f"[图片生成] 步骤4完成: HTML内容生成成功，大小: {len(html_content)} 字符")
 
+            logger.info(f"[图片生成] 步骤5: 生成临时图片文件")
             # 生成临时图片文件
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"qxqy_level_{level_id}_{timestamp}.png"
             output_path = os.path.join(tempfile.gettempdir(), filename)
+            logger.info(f"[图片生成] 输出路径: {output_path}")
 
+            logger.info(f"[图片生成] 步骤6: 使用Playwright渲染图片")
             # 使用图片渲染器生成图片（横版 16:9，4K 分辨率）
             renderer = get_image_renderer()
             await renderer.render_to_file(
                 html_content=html_content,
                 output_path=output_path
             )
+            logger.info(f"[图片生成] 步骤6完成: 图片渲染成功")
 
             # 调度临时文件自动清理
-            asyncio.create_task(self._schedule_file_cleanup(output_path,300))
-            logger.info(f"已调度临时图片自动清理: {output_path}")
+            asyncio.create_task(self._schedule_file_cleanup(output_path, 300))
+            logger.info(f"[图片生成] 已调度临时图片自动清理（5分钟后）: {output_path}")
 
+            logger.info(f"[图片生成] 完成: 关卡ID={level_id}, 图片路径={output_path}")
             return True, "关卡图片生成成功", output_path
 
         except Exception as e:
-            logger.error(f"生成关卡图片失败: {str(e)}")
-            logger.error(traceback.format_exc())
+            logger.error(f"[图片生成] 失败: {str(e)}")
+            logger.error(f"[图片生成] 异常堆栈:\n{traceback.format_exc()}")
             return False, f"生成图片失败: {str(e)}", None
 
     def _get_background_url(self, cover_url: str) -> str:

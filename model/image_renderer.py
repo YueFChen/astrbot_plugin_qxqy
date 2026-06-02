@@ -101,47 +101,68 @@ class ImageRenderer:
         Returns:
             输出图片的绝对路径
         """
+        logger.info(f"[渲染器] 开始渲染图片: width={width}, height={height}, scale={scale}")
+        
+        logger.info(f"[渲染器] 步骤1: 确保浏览器已安装")
         await _ensure_browser_installed()
         from playwright.async_api import async_playwright
+        logger.info(f"[渲染器] 步骤1完成: 浏览器就绪")
 
         # 写入临时 HTML 文件
         try:
+            logger.info(f"[渲染器] 步骤2: 创建临时HTML文件")
             with tempfile.NamedTemporaryFile(
                 mode='w', suffix='.html', delete=True, encoding='utf-8'
             ) as f:
                 f.write(html_content)
                 f.flush()
+                temp_file_path = f.name
+                logger.info(f"[渲染器] 步骤2完成: 临时文件创建成功 - {temp_file_path}")
 
                 browser = None
                 try:
+                    logger.info(f"[渲染器] 步骤3: 启动Chromium浏览器")
                     async with async_playwright() as p:
                         browser = await p.chromium.launch(headless=True)
+                        logger.info(f"[渲染器] 步骤3完成: 浏览器启动成功")
+
+                        logger.info(f"[渲染器] 步骤4: 创建新页面")
                         page = await browser.new_page(
                             viewport={"width": width, "height": height},
                             device_scale_factor=scale
                         )
-                        await page.goto(Path(f.name).as_uri())
+                        logger.info(f"[渲染器] 步骤4完成: 页面创建成功")
+
+                        logger.info(f"[渲染器] 步骤5: 加载HTML内容")
+                        await page.goto(Path(temp_file_path).as_uri())
+                        logger.info(f"[渲染器] 步骤5完成: HTML加载成功")
 
                         # 等待页面和资源加载完成
+                        logger.info(f"[渲染器] 步骤6: 等待页面加载完成")
                         await self._wait_for_page_load(page)
+                        logger.info(f"[渲染器] 步骤6完成: 页面加载完成")
 
                         # 截图保存到文件
+                        logger.info(f"[渲染器] 步骤7: 截图并保存到文件 - {output_path}")
                         await page.screenshot(path=output_path, type="png", scale="device")
+                        logger.info(f"[渲染器] 步骤7完成: 截图成功")
 
-                    logger.info(f"图片渲染完成: {output_path}")
+                    logger.info(f"[渲染器] 渲染完成: {output_path}")
                     return output_path
                 except Exception as e:
-                    logger.error(f"渲染图片失败: {e}")
+                    logger.error(f"[渲染器] 渲染图片失败: {e}")
                     raise
                 finally:
                     # 确保浏览器实例被正确关闭
                     if browser:
                         try:
+                            logger.info(f"[渲染器] 关闭浏览器实例")
                             await browser.close()
+                            logger.info(f"[渲染器] 浏览器关闭成功")
                         except Exception as close_e:
-                            logger.error(f"关闭浏览器失败: {close_e}")
+                            logger.error(f"[渲染器] 关闭浏览器失败: {close_e}")
         except Exception as e:
-            logger.error(f"创建临时HTML文件失败: {e}")
+            logger.error(f"[渲染器] 创建临时HTML文件失败: {e}")
             raise
 
     async def render_to_bytes(
