@@ -1,14 +1,34 @@
 # 千星助手 (astrbot_plugin_qxqy)
 
-基于 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 的奇域（原神·千星奇域）关卡查询插件。查询关卡详情、评论，并支持全量评论 CSV 导出。
+基于 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 的奇域（原神·千星奇域）关卡查询插件。查询关卡详情、评论，并支持全量评论 CSV 导出和关卡图片生成。
 
 ## 功能
 
-| 功能 | 命令 | 说明 |
-|------|------|------|
-| 关卡详情 | `/qx {level_id}` | 查看关卡名称、热度、好评率、简介和封面图 |
-| 评论预览 | `/qc {level_id}` | 查看最新评论，显示好评/差评统计 |
-| 全量导出 | `/qce {level_id}` | 抓取全部评论生成 CSV 文件发送 |
+| 功能 | 命令 | 参数 | 说明 |
+|------|------|------|------|
+| 关卡详情 | `/qx.i {level_id}` | `-p` | 查看关卡详情，-p 参数生成图片输出 |
+| 评论预览 | `/qx.c {level_id}` | `-ae` | 查看最新评论，-ae 参数导出 CSV |
+
+### 命令参数说明
+
+- `-p`：生成关卡图片（配合 `/qx.i` 使用）
+- `-ae`：导出全量评论为 CSV 文件（配合 `/qx.c` 使用）
+
+### 使用示例
+
+```bash
+# 查询关卡详情（文本模式）
+/qx.i 1001
+
+# 查询关卡详情（图片模式）
+/qx.i 1001 -p
+
+# 查看关卡评论（文本模式）
+/qx.c 1001
+
+# 导出全量评论（CSV模式）
+/qx.c 1001 -ae
+```
 
 ### 全量导出 CSV 字段
 
@@ -45,18 +65,24 @@ cd data/plugins
 git clone https://github.com/YueFChen/astrbot_plugin_qxqy.git
 ```
 
+首次运行会自动安装 Chromium 浏览器用于图片渲染。
+
 ## 项目结构
 
 ```
 astrbot_plugin_qxqy/
 ├── main.py               # 插件入口（命令声明与调度）
 ├── _conf_schema.json     # 插件配置 Schema
+├── command.json          # 命令定义（用于插件市场展示）
 ├── metadata.yaml         # 插件元数据
+├── requirements.txt      # Python 依赖声明
 ├── model/
 │   ├── __init__.py       # 模块导出
 │   ├── api_client.py     # 米游社 API 客户端（HTTP 请求）
-│   └── service.py        # 业务逻辑层（数据处理与消息构建）
-└── README.md
+│   ├── service.py        # 业务逻辑层（数据处理与消息构建）
+│   └── image_renderer.py # 图片渲染器（使用 Playwright）
+└── templates/
+    └── level_card.html   # 关卡卡片 HTML 模板
 ```
 
 ## 数据来源

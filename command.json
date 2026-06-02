@@ -1,0 +1,28 @@
+[
+    {
+        "base_cmd": "/qx.i",
+        "opt_args": ["-p"],
+        "desc": "查询关卡详情，-p参数生成图片输出，无参默认文本",
+        "usage": [
+            "/qx.i <关卡ID>",
+            "/qx.i <关卡ID> -p"
+        ],
+        "examples": [
+            "/qx.i 1001",
+            "/qx.i 1001 -p"
+        ]
+    },
+    {
+        "base_cmd": "/qx.c",
+        "opt_args": ["-ae"],
+        "desc": "文本形式查看关卡评论，-ae参数导出所有评论为csv文件",
+        "usage": [
+            "/qx.c <关卡ID>",
+            "/qx.c <关卡ID> -ae"
+        ],
+        "examples": [
+            "/qx.c 1001",
+            "/qx.c 1001 -ae"
+        ]
+    }
+]

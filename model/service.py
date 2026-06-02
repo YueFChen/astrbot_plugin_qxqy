@@ -1,18 +1,24 @@
 import asyncio
 import csv
 import os
+import random
+import tempfile
+import traceback
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
 
 from .api_client import MiyousheAPIClient
+from .image_renderer import get_image_renderer
 
 
 class QxqyService:
     """千星奇域服务层"""
 
     DEFAULT_PRAISE = "非常优秀的奇域，推荐大家游玩~"
+    TEMP_FILE_CLEANUP_DELAY = 300  # 临时文件清理延迟（秒），默认5分钟
 
     DEFAULT_CONFIG = {
         "comments_count": 30,
@@ -32,6 +38,43 @@ class QxqyService:
         if isinstance(self.config, dict):
             return self.config.get(key, self.DEFAULT_CONFIG[key])
         return self.DEFAULT_CONFIG[key]
+
+    def _safe_get(self, data: Optional[dict], key: str, default="") -> Any:
+        """
+        安全获取字典值，统一处理None和空字典情况
+        
+        Args:
+            data: 字典数据，可能为None或空字典
+            key: 要获取的键名
+            default: 默认值，默认为空字符串
+        
+        Returns:
+            字典中对应键的值，如果不存在或data为None则返回默认值
+        """
+        if data is None:
+            return default
+        value = data.get(key, default)
+        return value if value is not None else default
+
+    async def _schedule_file_cleanup(self, filepath: str, delay: int):
+        """
+        延迟清理临时文件
+        
+        Args:
+            filepath: 要清理的文件路径
+            delay: 延迟时间（秒），默认为TEMP_FILE_CLEANUP_DELAY
+        """
+        if delay is None:
+            delay = self.TEMP_FILE_CLEANUP_DELAY
+        
+        await asyncio.sleep(delay)
+        
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+                logger.info(f"已自动清理临时文件: {filepath}")
+            except Exception as e:
+                logger.warning(f"清理临时文件失败: {filepath}, 错误: {str(e)}")
 
     async def query_level_detail(self, level_id: str) -> Tuple[bool, str, Optional[List]]:
         """
@@ -145,7 +188,7 @@ class QxqyService:
 
     async def export_comments_csv(self, level_id: str) -> Tuple[bool, str, Optional[str], Optional[str]]:
         """
-        全量导出关卡评论为CSV文件
+        全量导出关卡评论为CSV文件（流式写入，支持超大文件）
 
         Args:
             level_id: 关卡ID
@@ -184,28 +227,36 @@ class QxqyService:
             "reply_count",
         ]
 
+        # 流式写入CSV文件，支持超大文件
         with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
+            
             for reply in reply_list:
-                user_info = reply.get("user_info", {}) or {}
-                reply_stat = reply.get("reply_stat", {}) or {}
+                user_info = self._safe_get(reply, "user_info") or {}
+                reply_stat = self._safe_get(reply, "reply_stat") or {}
+                
                 writer.writerow({
-                    "floor_id": reply.get("floor_id", ""),
-                    "reply_id": reply.get("reply_id", ""),
-                    "uid": user_info.get("uid", ""),
-                    "nickname": user_info.get("nickname", ""),
-                    "is_recommend": "是" if reply.get("is_recommend") else "否",
-                    "content": reply.get("content", ""),
-                    "created_at": self._format_timestamp(reply.get("created_at", 0)),
-                    "client_ip": reply.get("client_ip", ""),
-                    "like_count": reply_stat.get("like_count", "0"),
-                    "reply_count": reply_stat.get("reply_count", "0"),
+                    "floor_id": self._safe_get(reply, "floor_id"),
+                    "reply_id": self._safe_get(reply, "reply_id"),
+                    "uid": self._safe_get(user_info, "uid"),
+                    "nickname": self._safe_get(user_info, "nickname"),
+                    "is_recommend": "是" if self._safe_get(reply, "is_recommend") or False else "否",
+                    "content": self._safe_get(reply, "content"),
+                    "created_at": self._format_timestamp(self._safe_get(reply, "created_at") or 0),
+                    "client_ip": self._safe_get(reply, "client_ip"),
+                    "like_count": self._safe_get(reply_stat, "like_count", "0"),
+                    "reply_count": self._safe_get(reply_stat, "reply_count", "0"),
                 })
 
         total = len(reply_list)
-        praise = sum(1 for r in reply_list if r.get("is_recommend"))
+        praise = sum(1 for r in reply_list if self._safe_get(r, "is_recommend") or False)
         criticism = total - praise
+
+        # 调度临时文件自动清理（异步执行，不阻塞当前流程）
+        asyncio.create_task(self._schedule_file_cleanup(filepath,180))
+        logger.info(f"已调度临时文件自动清理: {filepath}")
+
         return True, (
             f"全量评论导出完成\n"
             f"关卡ID：{level_id}\n"
@@ -308,3 +359,135 @@ class QxqyService:
             except Exception:
                 return ""
         return ""
+
+    async def generate_level_image(self, level_id: str) -> Tuple[bool, str, Optional[str]]:
+        """
+        生成关卡详情图片
+
+        Args:
+            level_id: 关卡ID
+
+        Returns:
+            (成功状态, 消息, 图片文件路径)
+        """
+        try:
+            data = await self.api_client.get_level_detail(level_id)
+            logger.info(f"API响应: {data}")
+        except asyncio.TimeoutError:
+            return False, "请求超时，请稍后重试", None
+        except Exception as e:
+            return False, f"网络请求失败: {str(e)}", None
+
+        retcode = data.get("retcode")
+        if retcode != 0:
+            err_msg = data.get("message", "Unknown error")
+            logger.error(f"API错误: retcode={retcode}, message={err_msg}, level_id={level_id}")
+            return False, f"API返回错误: retcode={retcode}, {err_msg}", None
+
+        level_info = data.get("data", {}).get("level_info", {})
+        if not level_info:
+            return False, "未找到该关卡的信息", None
+
+        try:
+            # 获取插件目录
+            plugin_dir = Path(__file__).parent.parent
+            template_path = plugin_dir / "templates" / "level_card.html"
+
+            if not template_path.exists():
+                return False, f"模板文件不存在: {template_path}", None
+
+            # 读取模板
+            with open(template_path, 'r', encoding='utf-8') as f:
+                template = f.read()
+
+            # 准备模板变量
+            level_name = self._safe_get(level_info, "level_name", "未知关卡")
+            level_intro = self._safe_get(level_info, "level_intro", "暂无简介")
+            hot_score = str(self._safe_get(level_info, "hot_score", "0"))
+            good_rate = self._safe_get(level_info, "good_rate", "0%")
+            cover_img = self._safe_get(level_info, "cover_img") or {}
+            cover_url = cover_img.get("url", "") if isinstance(cover_img, dict) else ""
+
+            # 截断过长的简介
+            intro_max_length = self._get_config("intro_max_length")
+            if len(level_intro) > intro_max_length:
+                level_intro = level_intro[:intro_max_length] + "..."
+
+            # 随机背景图和主题色
+            bg_url = self._get_background_url(cover_url)
+            theme_color = self._get_theme_color()
+            bg_x = random.randint(0, 100)
+            bg_y = random.randint(0, 100)
+            bg_position = f"{bg_x}% {bg_y}%"
+
+            # 替换模板变量
+            html_content = template.replace("{{level_id}}", level_id)
+            html_content = html_content.replace("{{level_name}}", level_name)
+            html_content = html_content.replace("{{level_intro}}", level_intro)
+            html_content = html_content.replace("{{hot_score}}", hot_score)
+            html_content = html_content.replace("{{good_rate}}", good_rate)
+            html_content = html_content.replace("{{bg_url}}", bg_url)
+            html_content = html_content.replace("{{theme_color}}", theme_color)
+            html_content = html_content.replace("{{bg_position}}", bg_position)
+
+            # 生成临时图片文件
+            temp_dir = tempfile.gettempdir()
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"qxqy_level_{level_id}_{timestamp}.png"
+            output_path = os.path.join(temp_dir, filename)
+
+            # 使用图片渲染器生成图片（横版 16:9，4K 分辨率）
+            renderer = get_image_renderer()
+            await renderer.render_to_file(
+                html_content=html_content,
+                output_path=output_path
+            )
+
+            # 调度临时文件自动清理
+            asyncio.create_task(self._schedule_file_cleanup(output_path,300))
+            logger.info(f"已调度临时图片自动清理: {output_path}")
+
+            return True, "关卡图片生成成功", output_path
+
+        except Exception as e:
+            logger.error(f"生成关卡图片失败: {str(e)}")
+            logger.error(traceback.format_exc())
+            return False, f"生成图片失败: {str(e)}", None
+
+    def _get_background_url(self, cover_url: str) -> str:
+        """
+        获取背景图 URL
+
+        Args:
+            cover_url: 关卡封面图 URL
+
+        Returns:
+            背景图 URL
+        """
+        # 优先使用关卡封面图
+        if cover_url:
+            return cover_url
+
+        # 回退到默认背景图（使用横版渐变 SVG，16:9 比例）
+        return "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221280%22 height=%22720%22%3E%3Cdefs%3E%3ClinearGradient id=%22grad%22 x1=%220%25%22 y1=%220%25%22 x2=%22100%25%22 y2=%22100%25%22%3E%3Cstop offset=%220%25%22 style=%22stop-color:%231a1a2e;stop-opacity:1%22/%3E%3Cstop offset=%22100%25%22 style=%22stop-color:%2316213e;stop-opacity:1%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect fill=%22url(%23grad)%22 width=%22100%25%22 height=%22100%25%22/%3E%3C/svg%3E"
+
+    def _get_theme_color(self) -> str:
+        """
+        获取随机主题色
+
+        Returns:
+            主题色十六进制值
+        """
+        theme_colors = [
+            "#2F4F4F",  # 深石板灰
+            "#4B0082",  # 靛蓝
+            "#006400",  # 深绿
+            "#8B0000",  # 深红
+            "#2F2F4F",  # 深紫蓝
+            "#4A4A6A",  # 灰紫
+            "#1a1a2e",  # 深夜蓝
+            "#16213e",  # 海军蓝
+            "#0f3460",  # 深蓝
+            "#533483",  # 紫罗兰
+        ]
+        return random.choice(theme_colors)
